@@ -62,6 +62,7 @@ EXPECTED_TOOLS = {
     "optix_emulator_status",
     "optix_stop_emulator",
     "optix_runtime_log_tail",
+    "optix_bridge_log_tail",
     "optix_deploy_updatesvc",
     "optix_add_widget",
     "optix_add_model_variable",
@@ -120,7 +121,7 @@ def test_mcp_tools_carry_readonly_destructive_annotations(cfg: core.Config) -> N
             "optix_studio_version","optix_runtime_status","optix_services_status",
             "optix_deploy_preflight","optix_cdp_screenshot","optix_cdp_ocr",
             "optix_bridge_validate_expression",
-            "optix_emulator_status", "optix_runtime_log_tail",
+            "optix_emulator_status", "optix_runtime_log_tail", "optix_bridge_log_tail",
             "optix_get_project_map", "optix_list_skills", "optix_get_skill"}
     DESTRUCTIVE = {"optix_deploy","optix_deploy_updatesvc","optix_bridge_delete_node",
                    "optix_runtime_stop","optix_cdp_click","optix_cdp_type",
