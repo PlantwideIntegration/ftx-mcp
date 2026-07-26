@@ -363,9 +363,14 @@ if ($NoServiceRegister) {
     # No -Trigger: the task is manual-only by design; start via
     # bootstrap/services.ps1 start (or Start-ScheduledTask). This keeps a
     # fresh logon quiet for developers who aren't actively touching Optix.
+    # -ExecutionTimeLimit ([TimeSpan]::Zero) => NO time limit. The
+    # New-ScheduledTaskSettingsSet DEFAULT is 72h (PT72H): Task Scheduler silently
+    # terminates the task after 3 days (result 0x00041306 SCHED_S_TASK_TERMINATED),
+    # which for a service meant to run for weeks looks like a random death. Disable it.
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-        -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+        -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
+        -ExecutionTimeLimit ([TimeSpan]::Zero)
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
     Register-ScheduledTask `

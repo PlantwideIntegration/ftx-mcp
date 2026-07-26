@@ -58,8 +58,14 @@ if ($existing) { Unregister-ScheduledTask -TaskName "ftx-mcp-chrome-cdp" -Confir
 $action = New-ScheduledTaskAction -Execute $chrome -Argument $chromeArgs
 # No -Trigger. Start via bootstrap/services.ps1 start.
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+# Explicit settings with -ExecutionTimeLimit ([TimeSpan]::Zero) => NO time limit.
+# Registering without -Settings inherits the 72h (PT72H) default, so the long-running
+# CDP Chrome would be killed by Task Scheduler after 3 days just like the service was.
+$settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask `
     -TaskName "ftx-mcp-chrome-cdp" `
-    -Action $action -Principal $principal | Out-Null
+    -Action $action -Principal $principal -Settings $settings | Out-Null
 $mode = if ($Headed) { "headed" } else { "headless" }
 Ok "Chrome CDP scheduled task registered ($mode; manual start; --remote-debugging-port=9222)"
