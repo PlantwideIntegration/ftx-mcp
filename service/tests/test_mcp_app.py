@@ -24,6 +24,7 @@ from service.tests.conftest import make_project
 EXPECTED_TOOLS = {
     "optix_health",
     "optix_doctor",
+    "optix_build_check",
     "optix_list_projects",
     "optix_list_skills",
     "optix_get_skill",
@@ -45,6 +46,7 @@ EXPECTED_TOOLS = {
     "optix_bridge_create_variable",
     "optix_bridge_create_folder",
     "optix_bridge_create_object",
+    "optix_bridge_create_netlogic",
     "optix_bridge_create_type",
     "optix_bridge_convert_to_type",
     "optix_bridge_move_node",
@@ -87,6 +89,16 @@ def _list_tools(mcp) -> list:
     return mcp._tool_manager.list_tools()
 
 
+def _run_tool(tool, **kwargs):
+    """Invoke a tool's fn and return its result, awaiting when the tool was
+    offloaded to a worker thread (its fn is an async wrapper). Lets a test call
+    a tool uniformly whether or not it is in the stay-sync allowlist."""
+    res = tool.fn(**kwargs)
+    if asyncio.iscoroutine(res):
+        return asyncio.run(res)
+    return res
+
+
 def test_mcp_registers_every_spec_tool(cfg: core.Config) -> None:
     mcp = make_mcp(cfg)
     names = {t.name for t in _list_tools(mcp)}
@@ -115,7 +127,7 @@ def test_mcp_tools_carry_readonly_destructive_annotations(cfg: core.Config) -> N
     writes/destructive ops. Reads -> readOnlyHint True; writes -> readOnlyHint
     False, destructiveHint False; destructive -> readOnlyHint False,
     destructiveHint True."""
-    READ = {"optix_health","optix_doctor","optix_find","optix_list_projects",
+    READ = {"optix_health","optix_doctor","optix_build_check","optix_find","optix_list_projects",
             "optix_list_screens","optix_read_file","optix_describe_node",
             "optix_describe_type","optix_list_ui_types","optix_bridge_status",
             "optix_studio_version","optix_runtime_status","optix_services_status",
@@ -157,7 +169,7 @@ def test_mcp_bridge_tool_returns_structured_nudge_on_failure(
         "nudge": "Open the project in Studio and run StartBridge."})
     mcp = make_mcp(cfg)
     tool = next(t for t in _list_tools(mcp) if t.name == "optix_bridge_set_property")
-    out = tool.fn(project="Alpha", node_path="UI/MainWindow/L1", name="Text", value="hi")
+    out = _run_tool(tool, project="Alpha", node_path="UI/MainWindow/L1", name="Text", value="hi")
     assert out["state"] == "failed"
     assert out["reason_code"] == "bridge_unreachable_studio_closed"
     assert "StartBridge" in out["nudge"]
@@ -195,27 +207,33 @@ def test_mcp_deploy_preflight_tool_returns_envelope(
     make_project(projects_root, "Alpha")
     mcp = make_mcp(cfg)
     tool = next(t for t in _list_tools(mcp) if t.name == "optix_deploy_preflight")
-    out = tool.fn(project="Alpha")
+    out = _run_tool(tool, project="Alpha")
     for key in ("ready", "blockers", "warnings", "checks"):
         assert key in out, f"preflight envelope missing {key!r}: {out}"
 
 
 def test_shellout_tools_are_offloaded_async(cfg: core.Config) -> None:
-    """Slow shell-out tools are async-wrapped so their blocking subprocess/CDP
-    calls run OFF the shared event loop. A sync tool fn runs directly on the loop
-    (FastMCP Tool.run), so a multi-second Studio/CDP call would stall the loop and
-    drop the MCP streamable-http transport (the observed 120s emulator_status
-    hang). Fast tools stay sync (so tests can call .fn directly and there's no
-    needless thread hop)."""
+    """Tools that do BLOCKING I/O are async-wrapped so they run OFF the shared
+    event loop. A sync tool fn runs directly on the loop (FastMCP Tool.run), so a
+    blocking call would stall the loop and drop the MCP streamable-http transport
+    (the observed 120s emulator_status hang / bridge-drop under bursts).
+
+    This covers BOTH shell-outs (subprocess/CDP) AND the bridge read tools: a
+    bridge read does blocking HTTP, so "read-only" does NOT mean "stays sync" --
+    keeping the bridge reads on the loop was the original drop bug. Only a small
+    allowlist of provably fast, pure-local tools stays sync (no needless thread
+    hop, and unit tests can call their .fn directly)."""
     mcp = make_mcp(cfg)
     by_name = {t.name: t for t in _list_tools(mcp)}
+    # shell-outs + bridge reads (blocking HTTP) must all be offloaded
     for n in ("optix_emulator_status", "optix_run_emulator", "optix_restart_emulator",
               "optix_cdp_screenshot", "optix_cdp_click", "optix_studio_version",
-              "optix_doctor", "optix_services_status", "optix_save"):
+              "optix_doctor", "optix_services_status", "optix_save", "optix_build_check",
+              "optix_describe_node", "optix_bridge_set_property", "optix_get_project_map"):
         assert by_name[n].is_async is True, f"{n} must be offloaded (async)"
-    for n in ("optix_health", "optix_list_projects", "optix_describe_node",
-              "optix_bridge_set_property", "optix_get_project_map"):
-        assert by_name[n].is_async is False, f"{n} should stay sync"
+    # only provably fast, pure-local tools stay on the loop
+    for n in ("optix_health", "optix_list_projects"):
+        assert by_name[n].is_async is False, f"{n} should stay sync (pure-local)"
 
 
 def test_mcp_call_tool_path_invokes_health(cfg: core.Config) -> None:
